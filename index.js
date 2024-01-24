@@ -9,7 +9,7 @@ require("dotenv").config();
 
 const app = express();
 app.use(cors());
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -31,6 +31,10 @@ db.connect((err) => {
   } else {
     console.log("Conexão bem-sucedida ao banco de dados MySQL");
   }
+});
+
+app.get("/", (req, res) => {
+  return res.json("Rota Home");
 });
 
 // Rotas

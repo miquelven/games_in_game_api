@@ -34,6 +34,14 @@ db.connect((err) => {
 });
 
 app.get("/", (req, res) => {
+  db.connect((err) => {
+    if (err) {
+      console.error("Erro ao conectar ao banco de dados:", err);
+    } else {
+      console.log("Conexão bem-sucedida ao banco de dados MySQL");
+    }
+  });
+
   return res.json("Rota Home");
 });
 

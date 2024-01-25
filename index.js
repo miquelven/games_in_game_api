@@ -26,48 +26,66 @@ const db = mysql.createConnection({
 });
 
 // Conectar ao banco de dados
-db.connect((err) => {
-  if (err) {
-    console.error("Erro ao conectar ao banco de dados:", err);
-  } else {
-    console.log("Conexão bem-sucedida ao banco de dados MySQL");
-  }
+const pool = mysql.createPool({
+  connectionLimit: 10, // Número máximo de conexões no pool
+  host: process.env.SECRET_HOST,
+  user: process.env.SECRET_USER,
+  password: process.env.SECRET_DBPASSWORD,
+  database: process.env.SECRET_DB,
 });
 
 // Rotas
 app.post("/register", async (req, res) => {
-  const { username, email, password } = req.body;
+  try {
+    const { username, email, password } = req.body;
 
-  // Hash da senha usando bcrypt
-  const hashedPassword = await bcrypt.hash(password, 10);
+    // Hash da senha usando bcrypt
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-  // SQL para inserir usuário no banco de dados
-  const sql = "INSERT INTO users (username, email, password) VALUES (?, ?, ?)";
-  const values = [username, email, hashedPassword];
+    // SQL para inserir usuário no banco de dados
+    const sql =
+      "INSERT INTO users (username, email, password) VALUES (?, ?, ?)";
+    const values = [username, email, hashedPassword];
 
-  // Executa a query usando a variável 'db' ao invés de 'connection'
-  db.query(sql, values, (error, results, fields) => {
-    if (error) {
-      console.error(error);
-      res
-        .status(500)
-        .json({ success: false, message: "Erro ao registrar usuário." });
-    } else {
-      const token = jwt.sign(
-        { id: results.insertId, email },
-        "jsdfnkjouittms",
-        { expiresIn: "1h" }
-      );
-      const name = username;
+    // Obter uma conexão do pool
+    pool.getConnection((err, connection) => {
+      if (err) {
+        console.error("Erro ao obter conexão do pool:", err);
+        res.status(500).json({ success: false, message: "Erro interno" });
+        return;
+      }
 
-      res.status(200).json({
-        success: true,
-        message: "Usuário registrado com sucesso.",
-        name,
-        token,
+      // Executar a query usando a conexão obtida do pool
+      connection.query(sql, values, (error, results, fields) => {
+        // Liberar a conexão de volta para o pool
+        connection.release();
+
+        if (error) {
+          console.error(error);
+          res
+            .status(500)
+            .json({ success: false, message: "Erro ao registrar usuário." });
+        } else {
+          const token = jwt.sign(
+            { id: results.insertId, email },
+            "jsdfnkjouittms",
+            { expiresIn: "1h" }
+          );
+          const name = username;
+
+          res.status(200).json({
+            success: true,
+            message: "Usuário registrado com sucesso.",
+            name,
+            token,
+          });
+        }
       });
-    }
-  });
+    });
+  } catch (error) {
+    console.error("Erro no registro:", error);
+    res.status(500).json({ success: false, message: "Erro interno" });
+  }
 });
 
 app.post("/login", async (req, res) => {

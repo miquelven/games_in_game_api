@@ -17,7 +17,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 const temporaryTokens = {};
 
 // Configuração do banco de dados
-const db = mysql.createConnection({
+const db = mysql.createPool({
   host: process.env.SECRET_HOST,
   user: process.env.SECRET_USER,
   password: process.env.SECRET_DBPASSWORD,

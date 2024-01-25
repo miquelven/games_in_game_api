@@ -18,6 +18,7 @@ const temporaryTokens = {};
 
 // Configuração do banco de dados
 const db = mysql.createConnection({
+  uri: process.env.SECRET_URI,
   host: process.env.SECRET_HOST,
   user: process.env.SECRET_USER,
   password: process.env.SECRET_DBPASSWORD,

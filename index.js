@@ -144,7 +144,7 @@ app.post("/reset-password", async (req, res) => {
     temporaryTokens[email] = token;
 
     // Lógica para enviar e-mail com o link contendo o token
-    const resetLink = `http://localhost:5173/resetpassword/${token}`;
+    const resetLink = `https://gametest-frontend.vercel.app/resetpassword/${token}`;
 
     const transporter = nodemailer.createTransport({
       service: "gmail",
@@ -348,23 +348,19 @@ app.post("/update-score", async (req, res) => {
                         .json({ status: 500, message: "Erro interno" });
                     }
 
-                    res
-                      .status(200)
-                      .json({
-                        status: 200,
-                        message: "Score atualizado com sucesso",
-                      });
+                    res.status(200).json({
+                      status: 200,
+                      message: "Score atualizado com sucesso",
+                    });
                   }
                 );
               } else {
                 // Liberar a conexão de volta para o pool
                 connection.release();
-                res
-                  .status(200)
-                  .json({
-                    status: 200,
-                    message: "Score não é um dos 10 melhores",
-                  });
+                res.status(200).json({
+                  status: 200,
+                  message: "Score não é um dos 10 melhores",
+                });
               }
             }
           );

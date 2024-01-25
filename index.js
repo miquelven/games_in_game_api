@@ -144,7 +144,7 @@ app.post("/reset-password", async (req, res) => {
     temporaryTokens[email] = token;
 
     // Lógica para enviar e-mail com o link contendo o token
-    const resetLink = `https://gametest-frontend.vercel.app/resetpassword/${token}`;
+    const resetLink = `https://gametest.com.br/resetpassword/${token}`;
 
     const transporter = nodemailer.createTransport({
       service: "gmail",

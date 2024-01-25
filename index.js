@@ -17,7 +17,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 const temporaryTokens = {};
 
 // Configuração do banco de dados
-const db = mysql.createPool({
+const db = mysql.createConnection({
   host: process.env.SECRET_HOST,
   user: process.env.SECRET_USER,
   password: process.env.SECRET_DBPASSWORD,
@@ -31,18 +31,6 @@ db.connect((err) => {
   } else {
     console.log("Conexão bem-sucedida ao banco de dados MySQL");
   }
-});
-
-app.get("/", (req, res) => {
-  db.connect((err) => {
-    if (err) {
-      console.error("Erro ao conectar ao banco de dados:", err);
-    } else {
-      console.log("Conexão bem-sucedida ao banco de dados MySQL");
-    }
-  });
-
-  return res.json("Rota Home");
 });
 
 // Rotas

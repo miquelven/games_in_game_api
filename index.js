@@ -84,12 +84,24 @@ app.post("/login", async (req, res) => {
     const { email, password } = req.body;
 
     // Buscar usuário no banco de dados
-    db.query(
-      "SELECT * FROM users WHERE email = ?",
-      [email],
-      async (err, results) => {
-        if (err) {
-          console.error("Erro ao fazer login:", err);
+    const sql = "SELECT * FROM users WHERE email = ?";
+    const values = [email];
+
+    // Obter uma conexão do pool
+    pool.getConnection((err, connection) => {
+      if (err) {
+        console.error("Erro ao obter conexão do pool:", err);
+        res.status(500).json({ success: false, message: "Erro interno" });
+        return;
+      }
+
+      // Executar a query usando a conexão obtida do pool
+      connection.query(sql, values, async (queryError, results) => {
+        // Liberar a conexão de volta para o pool
+        connection.release();
+
+        if (queryError) {
+          console.error("Erro ao fazer login:", queryError);
           res.status(500).json({ success: false, message: "Erro interno" });
         } else if (results.length > 0) {
           const user = results[0];
@@ -100,9 +112,7 @@ app.post("/login", async (req, res) => {
             const token = jwt.sign(
               { id: user.id, email: user.email },
               "jsdfnkjouittms",
-              {
-                expiresIn: "1h",
-              }
+              { expiresIn: "1h" }
             );
 
             res.status(200).json({ success: true, token });
@@ -116,8 +126,8 @@ app.post("/login", async (req, res) => {
             .status(404)
             .json({ success: false, message: "Usuário não encontrado" });
         }
-      }
-    );
+      });
+    });
   } catch (error) {
     console.error("Erro no login:", error);
     res.status(500).json({ success: false, message: "Erro interno" });
@@ -151,18 +161,31 @@ app.post("/reset-password", async (req, res) => {
       text: `Clique no link para redefinir sua senha: ${resetLink}`,
     };
 
-    transporter.sendMail(mailOptions, (error, info) => {
-      if (error) {
-        console.error("Erro ao enviar e-mail:", error);
-        res
-          .status(500)
-          .json({ success: false, message: "Erro ao enviar e-mail" });
-      } else {
-        console.log("E-mail enviado:", info.response);
-        res
-          .status(200)
-          .json({ success: true, message: "E-mail enviado com sucesso" });
+    // Obter uma conexão do pool
+    pool.getConnection((err, connection) => {
+      if (err) {
+        console.error("Erro ao obter conexão do pool:", err);
+        res.status(500).json({ success: false, message: "Erro interno" });
+        return;
       }
+
+      // Executar a lógica de envio de e-mail e, em seguida, liberar a conexão de volta para o pool
+      transporter.sendMail(mailOptions, (mailError, info) => {
+        // Liberar a conexão de volta para o pool
+        connection.release();
+
+        if (mailError) {
+          console.error("Erro ao enviar e-mail:", mailError);
+          res
+            .status(500)
+            .json({ success: false, message: "Erro ao enviar e-mail" });
+        } else {
+          console.log("E-mail enviado:", info.response);
+          res
+            .status(200)
+            .json({ success: true, message: "E-mail enviado com sucesso" });
+        }
+      });
     });
   } catch (error) {
     console.error("Erro na recuperação de senha:", error);
@@ -175,29 +198,43 @@ app.post("/togglepassword", async (req, res) => {
     const { token, password } = req.body;
     const email = Object.keys(temporaryTokens)[0];
     const tokenValue = Object.values(temporaryTokens)[0];
-    if (!token) {
-      console.log("Token ausente:", token);
-      return res.status(400).json({ status: 400, message: "Token ausente" });
+
+    if (!token || token !== tokenValue) {
+      console.log("Token inválido:", token);
+      return res.status(400).json({ status: 400, message: "Token inválido" });
     }
-    console.log("password: " + password);
+
     // Lógica para atualizar a senha no banco de dados
     const hashedPassword = await bcrypt.hash(password, 10);
+
     // SQL para atualizar a senha do usuário
     const updateSql = "UPDATE users SET password = ? WHERE email = ?";
     const updateValues = [hashedPassword, email];
-    db.query(updateSql, updateValues, (error, results, fields) => {
-      if (error) {
-        console.error("Erro ao atualizar a senha:", error);
-        return res.status(500).json({ status: 500, message: "Erro interno" });
+
+    // Obter uma conexão do pool
+    pool.getConnection((err, connection) => {
+      if (err) {
+        console.error("Erro ao obter conexão do pool:", err);
+        res.status(500).json({ status: 500, message: "Erro interno" });
+        return;
       }
-      if (results) {
-        console.log("Result: " + JSON.stringify(results));
-      }
-      // Remova o token temporário após a atualização da senha
-      delete temporaryTokens[0];
-      res
-        .status(200)
-        .json({ status: 200, message: "Senha alterada com sucesso" });
+
+      // Executar a query de atualização e, em seguida, liberar a conexão de volta para o pool
+      connection.query(updateSql, updateValues, (error, results, fields) => {
+        // Liberar a conexão de volta para o pool
+        connection.release();
+
+        if (error) {
+          console.error("Erro ao atualizar a senha:", error);
+          return res.status(500).json({ status: 500, message: "Erro interno" });
+        }
+
+        // Remova o token temporário após a atualização da senha
+        delete temporaryTokens[email];
+        res
+          .status(200)
+          .json({ status: 200, message: "Senha alterada com sucesso" });
+      });
     });
   } catch (error) {
     console.error("Erro durante a alteração da senha:", error);
@@ -218,6 +255,9 @@ app.post("/logout", (req, res) => {
     } else {
       // Adiciona o token à lista negra (revoga o token)
       tokenBlacklist.add(session_token);
+
+      // Lógica adicional, se necessário, como invalidar o token no cliente
+
       res.status(200).json({ success: true, message: "Logout bem-sucedido." });
     }
   } catch (error) {
@@ -231,60 +271,103 @@ app.post("/update-score", async (req, res) => {
   try {
     const { email, newScore } = req.body;
 
-    // Busque o ID do usuário usando o email
-    const getUserIdSql = "SELECT id FROM users WHERE email = ?";
-    const getUserIdValues = [email];
-
-    db.query(getUserIdSql, getUserIdValues, (getIdError, getIdResults) => {
-      if (getIdError) {
-        console.error("Erro ao obter o ID do usuário:", getIdError);
-        return res.status(500).json({ status: 500, message: "Erro interno" });
+    // Obter uma conexão do pool
+    pool.getConnection((err, connection) => {
+      if (err) {
+        console.error("Erro ao obter conexão do pool:", err);
+        res.status(500).json({ status: 500, message: "Erro interno" });
+        return;
       }
 
-      const userId = getIdResults[0].id;
+      // Busque o ID do usuário usando o email
+      const getUserIdSql = "SELECT id FROM users WHERE email = ?";
+      const getUserIdValues = [email];
 
-      // Verifique se há scores existentes para o usuário
-      const getTopScoresSql =
-        "SELECT score FROM user_scores WHERE user_id = ? ORDER BY score DESC LIMIT 10";
-      const getTopScoresValues = [userId];
-
-      db.query(
-        getTopScoresSql,
-        getTopScoresValues,
-        (getScoresError, getScoresResults) => {
-          if (getScoresError) {
-            console.error("Erro ao obter os melhores scores:", getScoresError);
+      connection.query(
+        getUserIdSql,
+        getUserIdValues,
+        (getIdError, getIdResults) => {
+          if (getIdError) {
+            console.error("Erro ao obter o ID do usuário:", getIdError);
+            // Liberar a conexão de volta para o pool
+            connection.release();
             return res
               .status(500)
               .json({ status: 500, message: "Erro interno" });
           }
 
-          const topScores = getScoresResults.map((row) => row.score);
+          const userId = getIdResults[0].id;
 
-          // Verifique se o novo score está entre os 10 melhores
-          if (newScore >= Math.min(...topScores) || topScores.length === 0) {
-            // Adicione o novo score à tabela
-            const addScoreSql =
-              "INSERT INTO user_scores (user_id, score) VALUES (?, ?)";
-            const addScoreValues = [userId, newScore];
+          // Verifique se há scores existentes para o usuário
+          const getTopScoresSql =
+            "SELECT score FROM user_scores WHERE user_id = ? ORDER BY score DESC LIMIT 10";
+          const getTopScoresValues = [userId];
 
-            db.query(addScoreSql, addScoreValues, (addError, addResults) => {
-              if (addError) {
-                console.error("Erro ao adicionar o novo score:", addError);
+          connection.query(
+            getTopScoresSql,
+            getTopScoresValues,
+            (getScoresError, getScoresResults) => {
+              if (getScoresError) {
+                console.error(
+                  "Erro ao obter os melhores scores:",
+                  getScoresError
+                );
+                // Liberar a conexão de volta para o pool
+                connection.release();
                 return res
                   .status(500)
                   .json({ status: 500, message: "Erro interno" });
               }
 
-              res
-                .status(200)
-                .json({ status: 200, message: "Score atualizado com sucesso" });
-            });
-          } else {
-            res
-              .status(200)
-              .json({ status: 200, message: "Score não é um dos 10 melhores" });
-          }
+              const topScores = getScoresResults.map((row) => row.score);
+
+              // Verifique se o novo score está entre os 10 melhores
+              if (
+                newScore >= Math.min(...topScores) ||
+                topScores.length === 0
+              ) {
+                // Adicione o novo score à tabela
+                const addScoreSql =
+                  "INSERT INTO user_scores (user_id, score) VALUES (?, ?)";
+                const addScoreValues = [userId, newScore];
+
+                connection.query(
+                  addScoreSql,
+                  addScoreValues,
+                  (addError, addResults) => {
+                    // Liberar a conexão de volta para o pool
+                    connection.release();
+
+                    if (addError) {
+                      console.error(
+                        "Erro ao adicionar o novo score:",
+                        addError
+                      );
+                      return res
+                        .status(500)
+                        .json({ status: 500, message: "Erro interno" });
+                    }
+
+                    res
+                      .status(200)
+                      .json({
+                        status: 200,
+                        message: "Score atualizado com sucesso",
+                      });
+                  }
+                );
+              } else {
+                // Liberar a conexão de volta para o pool
+                connection.release();
+                res
+                  .status(200)
+                  .json({
+                    status: 200,
+                    message: "Score não é um dos 10 melhores",
+                  });
+              }
+            }
+          );
         }
       );
     });
@@ -300,45 +383,65 @@ app.get("/api/scores", async (req, res) => {
   try {
     const { email } = req.query;
 
-    // Busque o ID do usuário usando o email
-    const getUserIdSql = "SELECT id FROM users WHERE email = ?";
-    const getUserIdValues = [email];
-
-    db.query(getUserIdSql, getUserIdValues, (getIdError, getIdResults) => {
-      if (getIdError) {
-        console.error("Erro ao obter o ID do usuário:", getIdError);
-        return res.status(500).json({ status: 500, message: "Erro interno" });
+    // Obter uma conexão do pool
+    pool.getConnection((err, connection) => {
+      if (err) {
+        console.error("Erro ao obter conexão do pool:", err);
+        res.status(500).json({ status: 500, message: "Erro interno" });
+        return;
       }
 
-      const userId = getIdResults[0].id;
+      // Busque o ID do usuário usando o email
+      const getUserIdSql = "SELECT id FROM users WHERE email = ?";
+      const getUserIdValues = [email];
 
-      // Busque os scores do usuário
-      const getUserScoresSql =
-        "SELECT score FROM user_scores WHERE user_id = ?";
-      const getUserScoresValues = [userId];
-
-      db.query(
-        getUserScoresSql,
-        getUserScoresValues,
-        (getScoresError, getScoresResults) => {
-          if (getScoresError) {
-            console.error(
-              "Erro ao obter os scores do usuário:",
-              getScoresError
-            );
+      connection.query(
+        getUserIdSql,
+        getUserIdValues,
+        (getIdError, getIdResults) => {
+          if (getIdError) {
+            console.error("Erro ao obter o ID do usuário:", getIdError);
+            // Liberar a conexão de volta para o pool
+            connection.release();
             return res
               .status(500)
               .json({ status: 500, message: "Erro interno" });
           }
 
-          const userScores = getScoresResults.map((row) => row.score);
+          const userId = getIdResults[0].id;
 
-          res.status(200).json({ status: 200, userScores });
+          // Busque as pontuações do usuário
+          const getUserScoresSql =
+            "SELECT score FROM user_scores WHERE user_id = ?";
+          const getUserScoresValues = [userId];
+
+          connection.query(
+            getUserScoresSql,
+            getUserScoresValues,
+            (getScoresError, getScoresResults) => {
+              // Liberar a conexão de volta para o pool
+              connection.release();
+
+              if (getScoresError) {
+                console.error(
+                  "Erro ao obter as pontuações do usuário:",
+                  getScoresError
+                );
+                return res
+                  .status(500)
+                  .json({ status: 500, message: "Erro interno" });
+              }
+
+              const userScores = getScoresResults.map((row) => row.score);
+
+              res.status(200).json({ status: 200, userScores });
+            }
+          );
         }
       );
     });
   } catch (error) {
-    console.error("Erro ao obter scores do usuário:", error);
+    console.error("Erro ao obter pontuações do usuário:", error);
     res.status(500).json({ status: 500, message: "Erro interno" });
   }
 });
@@ -346,22 +449,42 @@ app.get("/api/scores", async (req, res) => {
 // Rota para obter os melhores scores de todos os usuários
 app.get("/api/top-scores", async (req, res) => {
   try {
-    // Consulta os 10 melhores scores de todos os usuários
-    const getTopScoresSql =
-      "SELECT u.username, us.score FROM users u JOIN user_scores us ON u.id = us.user_id ORDER BY us.score DESC LIMIT 10";
-
-    db.query(getTopScoresSql, (getTopScoresError, getTopScoresResults) => {
-      if (getTopScoresError) {
-        console.error("Erro ao obter os melhores scores:", getTopScoresError);
-        return res.status(500).json({ status: 500, message: "Erro interno" });
+    // Obter uma conexão do pool
+    pool.getConnection((err, connection) => {
+      if (err) {
+        console.error("Erro ao obter conexão do pool:", err);
+        res.status(500).json({ status: 500, message: "Erro interno" });
+        return;
       }
 
-      const topScores = getTopScoresResults.map((row) => ({
-        name: row.username,
-        score: row.score,
-      }));
+      // Consulta os 10 melhores scores de todos os usuários
+      const getTopScoresSql =
+        "SELECT u.username, us.score FROM users u JOIN user_scores us ON u.id = us.user_id ORDER BY us.score DESC LIMIT 10";
 
-      res.status(200).json({ status: 200, topScores });
+      connection.query(
+        getTopScoresSql,
+        (getTopScoresError, getTopScoresResults) => {
+          // Liberar a conexão de volta para o pool
+          connection.release();
+
+          if (getTopScoresError) {
+            console.error(
+              "Erro ao obter os melhores scores:",
+              getTopScoresError
+            );
+            return res
+              .status(500)
+              .json({ status: 500, message: "Erro interno" });
+          }
+
+          const topScores = getTopScoresResults.map((row) => ({
+            name: row.username,
+            score: row.score,
+          }));
+
+          res.status(200).json({ status: 200, topScores });
+        }
+      );
     });
   } catch (error) {
     console.error("Erro ao obter os melhores scores:", error);

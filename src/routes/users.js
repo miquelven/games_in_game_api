@@ -52,15 +52,13 @@ router.post("/togglepassword", async (req, res) => {
   try {
     const { token, password } = req.body;
     const result = await updatePassword(token, password);
-    res.status(result.status).json(result);
+    res.status(200).json(result);
   } catch (error) {
     console.error("Erro durante a alteração da senha:", error);
-    res
-      .status(error.status || 500)
-      .json({
-        status: error.status || 500,
-        message: error.message || "Erro interno",
-      });
+    res.status(error.status || 500).json({
+      status: error.status || 500,
+      message: error.message || "Erro interno",
+    });
   }
 });
 

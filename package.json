@@ -3,12 +3,9 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
-  "engines": {
-    "node": "18.x"
-  },
+  "type": "module",
   "scripts": {
-    "start": "node index.js",
-    "dev": "npx nodemon ./index.js"
+    "dev": "npx nodemon ./src/server.js"
   },
   "keywords": [],
   "author": "",
@@ -19,9 +16,9 @@
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
+    "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.7.0",
-    "nodemailer": "^6.9.8",
-    "vue3-google-login": "^2.0.25"
+    "nodemailer": "^6.9.8"
   }
 }

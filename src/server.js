@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
 import helmet from "helmet";
-import router from "./src/routes/index.js";
+import router from "./routes/index.js";
 
 const app = express();
 app.use(helmet());

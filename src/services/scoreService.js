@@ -47,11 +47,13 @@ export const updateScore = async (email, newScore) => {
     const userId = await getUserIdByEmail(email);
     const topScores = await getTopScoresForUser(userId);
 
-    if (newScore >= Math.min(...topScores) || topScores.length === 0) {
+    // Lógica simples: se tiver menos de 10 scores, adiciona.
+    // Se tiver 10, só adiciona se for maior que o menor deles.
+    if (topScores.length < 10 || newScore > Math.min(...topScores)) {
       await addScore(userId, newScore);
-      return { status: 200, message: "Score atualizado com sucesso" };
+      return { success: true, message: "Score atualizado com sucesso" };
     } else {
-      return { status: 200, message: "Score não é um dos 10 melhores" };
+      return { success: false, message: "Score não é um dos 10 melhores" };
     }
   } catch (error) {
     console.error("Erro durante a atualização do score:", error);
@@ -71,7 +73,7 @@ export const getUserScores = async (email) => {
         .promise()
         .query(getUserScoresSql, [userId]);
 
-      return { status: 200, userScores: results.map((row) => row.score) };
+      return { userScores: results.map((row) => row.score) };
     } finally {
       releaseConnection(connection);
     }
@@ -95,7 +97,6 @@ export const getTopScores = async () => {
       const [results] = await connection.promise().query(getTopScoresSql);
 
       return {
-        status: 200,
         topScores: results.map((row) => ({
           name: row.username,
           score: row.score,
@@ -105,7 +106,7 @@ export const getTopScores = async () => {
       releaseConnection(connection);
     }
   } catch (error) {
-    console.error("Erro ao obter os melhores scores:", error);
-    throw error;
+    console.error("Erro ao obter top scores:", error);
+    throw { status: 500, message: "Erro interno ao buscar rankings" };
   }
 };

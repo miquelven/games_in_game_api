@@ -3,89 +3,84 @@ import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
 import { getConnection, releaseConnection } from "../utils/dbHelper.js";
 
+// Em memória (Ideal seria Redis ou Banco de Dados)
 const TEMPORARY_TOKENS = {};
+const TOKEN_BLACKLIST = new Set();
+
+const JWT_SECRET = process.env.JWT_SECRET || "default_secret_please_change";
 
 export const registerUser = async (username, email, password) => {
   const hashedPassword = await bcrypt.hash(password, 10);
   const sql = "INSERT INTO users (username, email, password) VALUES (?, ?, ?)";
   const values = [username, email, hashedPassword];
 
+  const connection = await getConnection();
   try {
-    const connection = await getConnection();
-    try {
-      return new Promise((resolve, reject) => {
-        connection.query(sql, values, (error, results) => {
-          releaseConnection(connection);
-          if (error)
-            return reject({
-              status: 500,
-              message: "Erro ao registrar usuário.",
-            });
+    const [result] = await connection.promise().query(sql, values);
 
-          const token = jwt.sign(
-            { id: results.insertId, email },
-            "jsdfnkjouittms",
-            { expiresIn: "1h" }
-          );
-          resolve({
-            success: true,
-            message: "Usuário registrado com sucesso.",
-            name: username,
-            token,
-          });
-        });
-      });
-    } finally {
-      releaseConnection(connection);
-    }
-  } catch (err) {
-    console.error("Erro ao obter conexão:", err);
-    throw { status: 500, message: "Erro interno" };
+    const token = jwt.sign({ id: result.insertId, email }, JWT_SECRET, {
+      expiresIn: "1h",
+    });
+
+    return {
+      success: true,
+      message: "Usuário registrado com sucesso.",
+      name: username,
+      token,
+    };
+  } catch (error) {
+    console.error("Erro no registro:", error);
+    throw { status: 500, message: "Erro ao registrar usuário." };
+  } finally {
+    releaseConnection(connection);
   }
 };
 
 export const authenticateUser = async (email, password) => {
   const sql = "SELECT * FROM users WHERE email = ?";
-  const values = [email];
 
+  const connection = await getConnection();
   try {
-    const connection = await getConnection();
-    try {
-      return new Promise(async (resolve, reject) => {
-        connection.query(sql, values, async (queryError, results) => {
-          releaseConnection(connection);
-          if (queryError)
-            return reject({ status: 500, message: "Erro interno" });
-          if (results.length === 0)
-            return reject({ status: 404, message: "Usuário não encontrado" });
+    const [results] = await connection.promise().query(sql, [email]);
 
-          const user = results[0];
-          const match = await bcrypt.compare(password, user.password);
-          if (!match)
-            return reject({ status: 401, message: "Credenciais inválidas" });
-
-          const token = jwt.sign(
-            { id: user.id, email: user.email },
-            "jsdfnkjouittms",
-            { expiresIn: "1h" }
-          );
-          resolve({ success: true, token });
-        });
-      });
-    } finally {
-      releaseConnection(connection);
+    if (results.length === 0) {
+      throw { status: 404, message: "Usuário não encontrado" };
     }
-  } catch (err) {
-    console.error("Erro ao obter conexão:", err);
+
+    const user = results[0];
+    const match = await bcrypt.compare(password, user.password);
+
+    if (!match) {
+      throw { status: 401, message: "Credenciais inválidas" };
+    }
+
+    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, {
+      expiresIn: "1h",
+    });
+
+    return { success: true, token };
+  } catch (error) {
+    if (error.status) throw error;
+    console.error("Erro na autenticação:", error);
     throw { status: 500, message: "Erro interno" };
+  } finally {
+    releaseConnection(connection);
   }
 };
 
 export const sendResetPasswordEmail = async (email) => {
-  const token = jwt.sign({ email }, "asdfnlsklpo", { expiresIn: "1h" });
-  TEMPORARY_TOKENS[email] = token;
+  // Gera token para reset
+  const token = jwt.sign({ email }, JWT_SECRET, { expiresIn: "1h" });
+
+  // Armazena token associado ao email
+  // Nota: Isso sobrescreve tokens anteriores para o mesmo email
+  TEMPORARY_TOKENS[token] = email;
+
+  // Limpeza básica (opcional): remover tokens expirados poderia ser feito aqui,
+  // mas para simplicidade manteremos assim.
 
   const resetLink = `https://gametest.com.br/resetpassword/${token}`;
+
   const transporter = nodemailer.createTransport({
     service: "gmail",
     auth: {
@@ -101,54 +96,56 @@ export const sendResetPasswordEmail = async (email) => {
     text: `Clique no link para redefinir sua senha: ${resetLink}`,
   };
 
-  return new Promise((resolve, reject) => {
-    transporter.sendMail(mailOptions, (mailError, info) => {
-      if (mailError)
-        return reject({ status: 500, message: "Erro ao enviar e-mail" });
-      resolve({ success: true, message: "E-mail enviado com sucesso" });
-    });
-  });
+  try {
+    await transporter.sendMail(mailOptions);
+    return { success: true, message: "E-mail enviado com sucesso" };
+  } catch (error) {
+    console.error("Erro ao enviar email:", error);
+    throw { status: 500, message: "Erro ao enviar e-mail" };
+  }
 };
 
 export const updatePassword = async (token, password) => {
-  const email = Object.keys(TEMPORARY_TOKENS)[0];
-  const tokenValue = Object.values(TEMPORARY_TOKENS)[0];
+  // Verifica se o token existe na memória
+  const email = TEMPORARY_TOKENS[token];
 
-  if (!token || token !== tokenValue)
-    return { status: 400, message: "Token inválido" };
+  if (!email) {
+    throw { status: 400, message: "Token inválido ou expirado" };
+  }
+
+  // Verifica validade do token JWT
+  try {
+    jwt.verify(token, JWT_SECRET);
+  } catch (err) {
+    delete TEMPORARY_TOKENS[token];
+    throw { status: 400, message: "Token inválido ou expirado" };
+  }
 
   const hashedPassword = await bcrypt.hash(password, 10);
   const sql = "UPDATE users SET password = ? WHERE email = ?";
-  const updateValues = [hashedPassword, email];
 
+  const connection = await getConnection();
   try {
-    const connection = await getConnection();
-    try {
-      return new Promise((resolve, reject) => {
-        connection.query(sql, updateValues, (error) => {
-          releaseConnection(connection);
-          if (error) return reject({ status: 500, message: "Erro interno" });
+    await connection.promise().query(sql, [hashedPassword, email]);
 
-          delete TEMPORARY_TOKENS[email];
-          resolve({ status: 200, message: "Senha alterada com sucesso" });
-        });
-      });
-    } finally {
-      releaseConnection(connection);
-    }
-  } catch (err) {
-    console.error("Erro ao obter conexão:", err);
+    // Remove o token usado
+    delete TEMPORARY_TOKENS[token];
+
+    return { status: 200, message: "Senha alterada com sucesso" };
+  } catch (error) {
+    console.error("Erro ao atualizar senha:", error);
     throw { status: 500, message: "Erro interno" };
+  } finally {
+    releaseConnection(connection);
   }
 };
 
 export const logout = (sessionToken) => {
-  const tokenBlacklist = new Set();
-
-  if (tokenBlacklist.has(sessionToken)) {
-    return { status: 401, message: "Token inválido." };
+  if (TOKEN_BLACKLIST.has(sessionToken)) {
+    throw { status: 401, message: "Token já invalidado." };
   } else {
-    tokenBlacklist.add(sessionToken);
+    TOKEN_BLACKLIST.add(sessionToken);
+    // Em um sistema real, precisaríamos limpar tokens antigos do Set periodicamente
     return { status: 200, message: "Logout bem-sucedido." };
   }
 };

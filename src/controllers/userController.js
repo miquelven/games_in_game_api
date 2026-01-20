@@ -1,6 +1,7 @@
 import {
   registerUser,
   authenticateUser,
+  authenticateGoogleUser,
   sendResetPasswordEmail,
   updatePassword,
   logout,
@@ -20,6 +21,16 @@ export const login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
     const result = await authenticateUser(email, password);
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const googleLogin = async (req, res, next) => {
+  try {
+    const { token } = req.body;
+    const result = await authenticateGoogleUser(token);
     res.status(200).json(result);
   } catch (error) {
     next(error);

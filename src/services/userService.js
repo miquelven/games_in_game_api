@@ -1,6 +1,7 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
+import { OAuth2Client } from "google-auth-library";
 import { getConnection, releaseConnection } from "../utils/dbHelper.js";
 
 // Em memória (Ideal seria Redis ou Banco de Dados)
@@ -8,6 +9,7 @@ const TEMPORARY_TOKENS = {};
 const TOKEN_BLACKLIST = new Set();
 
 const JWT_SECRET = process.env.JWT_SECRET || "default_secret_please_change";
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 export const registerUser = async (username, email, password) => {
   const hashedPassword = await bcrypt.hash(password, 10);
@@ -65,6 +67,60 @@ export const authenticateUser = async (email, password) => {
     throw { status: 500, message: "Erro interno" };
   } finally {
     releaseConnection(connection);
+  }
+};
+
+export const authenticateGoogleUser = async (googleToken) => {
+  try {
+    const ticket = await client.verifyIdToken({
+      idToken: googleToken,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    const { email, name, sub: googleId } = payload;
+
+    const connection = await getConnection();
+    try {
+      // Verifica se o usuário já existe
+      const checkUserSql = "SELECT * FROM users WHERE email = ?";
+      const [results] = await connection.promise().query(checkUserSql, [email]);
+
+      let user;
+
+      if (results.length > 0) {
+        // Usuário existe, loga ele
+        user = results[0];
+      } else {
+        // Usuário não existe, cria um novo
+        // Gera uma senha aleatória forte pois ele vai logar via Google
+        const randomPassword =
+          Math.random().toString(36).slice(-8) +
+          Math.random().toString(36).slice(-8);
+        const hashedPassword = await bcrypt.hash(randomPassword, 10);
+
+        const insertSql =
+          "INSERT INTO users (username, email, password) VALUES (?, ?, ?)";
+        const [insertResult] = await connection
+          .promise()
+          .query(insertSql, [name, email, hashedPassword]);
+
+        user = { id: insertResult.insertId, email, username: name };
+      }
+
+      const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, {
+        expiresIn: "1h",
+      });
+
+      return { success: true, token, username: user.username };
+    } finally {
+      releaseConnection(connection);
+    }
+  } catch (error) {
+    console.error("Erro na autenticação Google:", error);
+    throw {
+      status: 401,
+      message: "Token Google inválido ou falha na autenticação",
+    };
   }
 };
 

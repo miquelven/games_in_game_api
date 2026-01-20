@@ -58,7 +58,7 @@ export const authenticateUser = async (email, password) => {
       expiresIn: "1h",
     });
 
-    return { success: true, token };
+    return { success: true, token, username: user.username };
   } catch (error) {
     if (error.status) throw error;
     console.error("Erro na autenticação:", error);
@@ -89,11 +89,27 @@ export const sendResetPasswordEmail = async (email) => {
     },
   });
 
+  const htmlContent = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px; background-color: #f9f9f9;">
+      <h2 style="color: #333; text-align: center;">Recuperação de Senha</h2>
+      <p style="color: #555; font-size: 16px;">Olá,</p>
+      <p style="color: #555; font-size: 16px;">Recebemos uma solicitação para redefinir a senha da sua conta. Se você não fez essa solicitação, pode ignorar este e-mail.</p>
+      <div style="text-align: center; margin: 30px 0;">
+        <a href="${resetLink}" style="background-color: #007bff; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-size: 16px; font-weight: bold;">Redefinir Senha</a>
+      </div>
+      <p style="color: #555; font-size: 14px;">Ou copie e cole o link abaixo no seu navegador:</p>
+      <p style="color: #007bff; font-size: 14px; word-break: break-all;">${resetLink}</p>
+      <hr style="border: 0; border-top: 1px solid #ddd; margin: 20px 0;">
+      <p style="color: #999; font-size: 12px; text-align: center;">Este link expira em 1 hora.</p>
+    </div>
+  `;
+
   const mailOptions = {
     from: process.env.SECRET_EMAIL,
     to: email,
     subject: "Recuperação de Senha",
     text: `Clique no link para redefinir sua senha: ${resetLink}`,
+    html: htmlContent,
   };
 
   try {

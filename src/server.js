@@ -10,13 +10,31 @@ const app = express();
 app.use(helmet());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors());
+
+const allowedOrigins = [
+  "https://www.chronorun.com.br",
+  "https://chronorun.com.br",
+  "http://localhost:5173",
+  "http://localhost:9001",
+];
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true,
+  }),
+);
 
 const port = process.env.PORT || 3000;
 
 app.use("/", router);
 
-// Middleware de tratamento de erros deve vir por último
 app.use(errorHandler);
 
 app.listen(port, () => {
